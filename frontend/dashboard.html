@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Streak — Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="dashboard-page">
+
+  <header class="topbar">
+    <div class="topbar-brand">◆ Streak</div>
+    <button class="btn-ghost" onclick="logout()">Sign out</button>
+  </header>
+
+  <main class="dashboard">
+
+    <div class="dashboard-header">
+      <div>
+        <h2 id="greeting">Good morning</h2>
+        <p class="dashboard-sub">Track today's habits below.</p>
+      </div>
+      <button class="btn-primary" onclick="openAddModal()">+ Add habit</button>
+    </div>
+
+    <!-- Habit list -->
+    <div id="habit-list" class="habit-list">
+      <div class="loading-state">Loading habits…</div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty-state hidden">
+      <div class="empty-icon">◇</div>
+      <p>No habits yet.</p>
+      <p class="empty-sub">Add your first habit to start tracking.</p>
+    </div>
+
+  </main>
+
+  <!-- Add habit modal -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeAddModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <h3>New habit</h3>
+      <form onsubmit="handleAddHabit(event)">
+        <div class="field">
+          <label for="habit-name">Name</label>
+          <input type="text" id="habit-name" placeholder="e.g. Read 30 minutes" required maxlength="80">
+        </div>
+        <div class="field">
+          <label for="habit-desc">Description <span class="optional">(optional)</span></label>
+          <input type="text" id="habit-desc" placeholder="e.g. Read before bed each night" maxlength="120">
+        </div>
+        <div id="add-error" class="form-error hidden"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn-ghost" onclick="closeAddModal()">Cancel</button>
+          <button type="submit" class="btn-primary" id="add-btn">Add habit</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const API = "http://localhost:8000";
+
+    // Redirect if not logged in
+    const token = localStorage.getItem("token");
+    if (!token) window.location.href = "index.html";
+
+    function authHeaders() {
+      return {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      };
+    }
+
+    // ---- Greeting ----
+    function setGreeting() {
+      const hour = new Date().getHours();
+      const greeting = hour < 12 ? "Good morning"
+                     : hour < 18 ? "Good afternoon"
+                     : "Good evening";
+      document.getElementById("greeting").textContent = greeting;
+    }
+    setGreeting();
+
+    // ---- Logout ----
+    function logout() {
+      localStorage.removeItem("token");
+      window.location.href = "index.html";
+    }
+
+    // ---- Fetch and render habits ----
+    async function loadHabits() {
+      try {
+        const res = await fetch(`${API}/habits`, { headers: authHeaders() });
+        if (res.status === 401) { logout(); return; }
+        const habits = await res.json();
+        renderHabits(habits);
+      } catch (err) {
+        document.getElementById("habit-list").innerHTML =
+          `<div class="error-state">Could not load habits. Is the backend running?</div>`;
+      }
+    }
+
+    function renderHabits(habits) {
+      const list    = document.getElementById("habit-list");
+      const empty   = document.getElementById("empty-state");
+
+      if (habits.length === 0) {
+        list.innerHTML = "";
+        empty.classList.remove("hidden");
+        return;
+      }
+
+      empty.classList.add("hidden");
+      list.innerHTML = habits.map(h => habitCard(h)).join("");
+    }
+
+    function habitCard(h) {
+      const streakLabel = h.streak === 1 ? "1 day streak"
+                        : h.streak  > 1  ? `${h.streak} day streak`
+                        : "No streak yet";
+      const fire = h.streak >= 7 ? "🔥" : h.streak >= 3 ? "⚡" : "";
+
+      return `
+        <div class="habit-card ${h.completed_today ? "completed" : ""}" id="habit-${h.id}">
+          <button
+            class="habit-check ${h.completed_today ? "checked" : ""}"
+            onclick="toggleHabit(${h.id}, ${h.completed_today})"
+            aria-label="${h.completed_today ? "Mark incomplete" : "Mark complete"}"
+          >${h.completed_today ? "✓" : ""}</button>
+
+          <div class="habit-info">
+            <div class="habit-name">${escapeHtml(h.name)}</div>
+            ${h.description ? `<div class="habit-desc">${escapeHtml(h.description)}</div>` : ""}
+          </div>
+
+          <div class="habit-streak">
+            <span class="streak-number">${h.streak}</span>
+            <span class="streak-label">${fire} ${streakLabel}</span>
+          </div>
+
+          <button class="habit-delete" onclick="deleteHabit(${h.id})" aria-label="Delete habit">✕</button>
+        </div>
+      `;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    // ---- Toggle completion ----
+    async function toggleHabit(id, currentlyCompleted) {
+      const method = currentlyCompleted ? "DELETE" : "POST";
+      try {
+        const res = await fetch(`${API}/habits/${id}/complete`, {
+          method,
+          headers: authHeaders(),
+        });
+        if (res.status === 401) { logout(); return; }
+        loadHabits();   // re-fetch to get updated streak
+      } catch (err) {
+        alert("Could not update habit. Try again.");
+      }
+    }
+
+    // ---- Delete habit ----
+    async function deleteHabit(id) {
+      if (!confirm("Delete this habit and all its history?")) return;
+      try {
+        const res = await fetch(`${API}/habits/${id}`, {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
+        if (res.status === 401) { logout(); return; }
+        loadHabits();
+      } catch (err) {
+        alert("Could not delete habit. Try again.");
+      }
+    }
+
+    // ---- Add habit modal ----
+    function openAddModal() {
+      document.getElementById("modal-overlay").classList.remove("hidden");
+      document.getElementById("habit-name").focus();
+    }
+
+    function closeAddModal() {
+      document.getElementById("modal-overlay").classList.add("hidden");
+      document.getElementById("habit-name").value = "";
+      document.getElementById("habit-desc").value = "";
+      document.getElementById("add-error").classList.add("hidden");
+    }
+
+    async function handleAddHabit(e) {
+      e.preventDefault();
+      const name = document.getElementById("habit-name").value.trim();
+      const desc = document.getElementById("habit-desc").value.trim();
+      const btn  = document.getElementById("add-btn");
+
+      btn.disabled = true;
+      btn.textContent = "Adding…";
+
+      try {
+        const res = await fetch(`${API}/habits`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ name, description: desc }),
+        });
+        if (res.status === 401) { logout(); return; }
+        if (!res.ok) throw new Error("Could not add habit.");
+        closeAddModal();
+        loadHabits();
+      } catch (err) {
+        const el = document.getElementById("add-error");
+        el.textContent = err.message;
+        el.classList.remove("hidden");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Add habit";
+      }
+    }
+
+    // Close modal on Escape
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") closeAddModal();
+    });
+
+    // ---- Init ----
+    loadHabits();
+  </script>
+</body>
+</html>
