@@ -1,0 +1,30 @@
+services:
+  # Backend — FastAPI web service
+  - type: web
+    name: habit-tracker-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true   # Render auto-generates a secure random value
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 60
+      - key: DATABASE_URL
+        fromDatabase:
+          name: habit-tracker-db
+          property: connectionString
+
+  # Frontend — static site
+  - type: web
+    name: habit-tracker-frontend
+    runtime: static
+    rootDir: frontend
+    staticPublishPath: .
+
+databases:
+  - name: habit-tracker-db
+    plan: free
